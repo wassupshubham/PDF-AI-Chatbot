@@ -105,14 +105,20 @@ def get_embeddings():
 import chromadb
 from langchain_chroma import Chroma
 
+import uuid
+
 def create_vectorstore(chunks, embeddings):
     # EphemeralClient memory space mein initialize hota hai aur disk par touch nahi karta
     chroma_client = chromadb.EphemeralClient()
     
+    # Generate a unique collection name to prevent old documents from leaking/appending
+    unique_col_name = f"col_{uuid.uuid4().hex}"
+    
     return Chroma.from_texts(
         texts=chunks, 
         embedding=embeddings,
-        client=chroma_client
+        client=chroma_client,
+        collection_name=unique_col_name
     )
 
 from langchain_google_genai import ChatGoogleGenerativeAI
