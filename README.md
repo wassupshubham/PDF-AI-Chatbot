@@ -1,3 +1,14 @@
+---
+title: InsightDocs AI
+emoji: 🤖
+colorFrom: indigo
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.58.0"
+app_file: app.py
+pinned: false
+---
+
 # 🤖 InsightDocs AI - Advanced PDF RAG Chatbot
 
 An enterprise-ready **Retrieval-Augmented Generation (RAG)** assistant designed for document intelligence. This application allows users to upload multi-page PDF documents and extract precise, fact-backed insights instantly using a cutting-edge open-source AI stack.
