@@ -29,6 +29,8 @@ from PIL import Image
 def load_local_ocr():
     return easyocr.Reader(['en'], gpu=False)
 
+import pypdfium2 as pdfium
+
 def extract_text_from_pdf(pdf_file):
     text = ""
     reader = load_local_ocr()
@@ -41,20 +43,17 @@ def extract_text_from_pdf(pdf_file):
                     text += page_text + "\n"
         
         if not text.strip() or len(text.strip()) < 100:
-            with st.spinner("🧠 Scanned Layout Detected. Initializing Deep Local OCR Engine..."):
+            with st.spinner("🧠 Scanned Layout Detected. Initializing Visual OCR Engine..."):
                 pdf_file.seek(0)
-                pypdf_reader = PdfReader(pdf_file)
+                pdf_data = pdf_file.read()
+                pdf_doc = pdfium.PdfDocument(pdf_data)
                 
-                for page_num, page in enumerate(pypdf_reader.pages):
-                    if "/XObject" in page["/Resources"]:
-                        xObject = page["/Resources"]["/XObject"].get_object()
-                        for obj in xObject:
-                            if xObject[obj]["/Subtype"] == "/Image":
-                                data = xObject[obj].get_data()
-                                img = Image.open(io.BytesIO(data))
-                                results = reader.readtext(img, detail=0)
-                                if results:
-                                    text += f"\n--- Page {page_num+1} Scan ---\n" + " ".join(results) + "\n"
+                for page_num, page in enumerate(pdf_doc):
+                    bitmap = page.render(scale=2)
+                    pil_img = bitmap.to_pil()
+                    results = reader.readtext(pil_img, detail=0)
+                    if results:
+                        text += f"\n--- Page {page_num+1} Scan ---\n" + " ".join(results) + "\n"
                                     
     except Exception as e:
         st.error(f"Local Extraction Layer Warning: {e}")
@@ -307,6 +306,39 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.05) !important;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
     }
+
+    /* Custom Chat Message Styling */
+    div[data-testid="stChatMessage"] {
+        background: rgba(22, 28, 45, 0.25) !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        border-radius: 14px !important;
+        padding: 18px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+        margin-bottom: 15px !important;
+    }
+    div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {
+        color: #F3F4F6 !important;
+    }
+    
+    /* Custom Chat Input styling */
+    div[data-testid="stChatInput"] {
+        background-color: transparent !important;
+        border: none !important;
+        margin-top: 15px !important;
+    }
+    div[data-testid="stChatInput"] textarea {
+        background-color: rgba(13, 16, 27, 0.85) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        color: #F3F4F6 !important;
+        border-radius: 12px !important;
+        padding: 12px !important;
+        box-shadow: 0 4px 25px rgba(0, 0, 0, 0.3) !important;
+        transition: all 0.3s ease !important;
+    }
+    div[data-testid="stChatInput"] textarea:focus {
+        border-color: #8B5CF6 !important;
+        box-shadow: 0 0 18px rgba(139, 92, 246, 0.35) !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -381,6 +413,9 @@ if uploaded_file is not None:
             if "vectorstore" in st.session_state:
                 st.session_state.vectorstore = None
                 del st.session_state["vectorstore"]
+            if "chat_history" in st.session_state:
+                st.session_state.chat_history = []
+                del st.session_state["chat_history"]
             st.session_state.current_file_name = uploaded_file.name
     else:
         st.session_state.current_file_name = uploaded_file.name
@@ -396,24 +431,53 @@ if uploaded_file is not None:
         st.success(f"Loaded {len(chunks)} contextual nodes successfully via Isolated Local Deep parsing!")
 
     if "vectorstore" in st.session_state and st.session_state.vectorstore is not None:
-        question = st.text_input("💬 Ask anything about this document:", placeholder="Type your question here...")
+        # Initialize chat history if not present
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Render past chat history in the visual stream
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg.get("sources"):
+                    with st.expander("📚 Source Passages Used"):
+                        for idx, src in enumerate(msg["sources"]):
+                            st.markdown(f"**Source {idx+1}:**")
+                            st.markdown(f'<div class="ai-response-box" style="font-size:0.9rem; padding:10px !important; margin-top:5px !important;">{src}</div>', unsafe_allow_html=True)
+
+        # Chat Input Area at the bottom
+        question = st.chat_input("💬 Ask anything about this document...")
 
         if question:
+            # Instantly display user message in the visual stream
+            with st.chat_message("user"):
+                st.markdown(question)
+
+            # Generate AI Response
             with st.spinner("Matching similarity nodes..."):
                 try:
                     docs = st.session_state.vectorstore.similarity_search(question, k=6)
                     context = "\n\n".join([doc.page_content for doc in docs])
 
+                    # Compile conversational memory
+                    chat_history_str = ""
+                    for msg in st.session_state.chat_history[-5:]:
+                        chat_history_str += f"{msg['role'].upper()}: {msg['content']}\n"
+
                     prompt = f"""
-You are a highly precise and knowledgeable Document Intelligence Assistant. Your objective is to answer the user's question.
+You are a highly precise and knowledgeable Document Intelligence Assistant. Your objective is to answer the user's question, taking into account any previous conversation history and the provided document context.
 
 Follow these instructions carefully:
 1. **Analyze the Document Context**: Read the provided document context. Ground your answer in this document's details first.
 2. **Supplement with General Knowledge**: If the document does not contain all the details needed to answer the question fully, or if the user asks for additional information/context, use your own pre-trained general knowledge to expand and explain.
 3. **Clearly Distinguish Sources**: In your response, clearly state what information is extracted directly from the uploaded document, and what information is supplemented by your own general knowledge.
-4. Do NOT reuse general titles, watermarks, or first-page metadata expressions unless explicitly asked.
+4. **Conversational Memory**: Use the chat history to understand follow-up references (e.g. "What about the second one?" or "Explain that").
+5. Do NOT reuse general titles, watermarks, or first-page metadata expressions unless explicitly asked.
 
-Context:
+Chat History:
+{chat_history_str}
+
+Document Context:
 {context}
 
 Question:
@@ -422,9 +486,23 @@ Question:
                     llm = get_llm(provider=provider, model_name=model_name, temperature=temperature)
                     response = llm.invoke(prompt)
 
-                    st.markdown("#### 💡 AI Response")
-                    st.markdown(f'<div class="ai-response-box">{response.content}</div>', unsafe_allow_html=True)
-                    
+                    # Display response in visual stream
+                    with st.chat_message("assistant"):
+                        st.markdown(response.content)
+                        with st.expander("📚 Source Passages Used"):
+                            for idx, doc in enumerate(docs):
+                                st.markdown(f"**Source {idx+1}:**")
+                                st.markdown(f'<div class="ai-response-box" style="font-size:0.9rem; padding:10px !important; margin-top:5px !important;">{doc.page_content}</div>', unsafe_allow_html=True)
+
+                    # Save to session chat history
+                    st.session_state.chat_history.append({"role": "user", "content": question})
+                    st.session_state.chat_history.append({
+                        "role": "assistant", 
+                        "content": response.content,
+                        "sources": [doc.page_content for doc in docs]
+                    })
+                    st.rerun()
+
                 except Exception as e:
                     st.error(f"Inference Engine Error: {e}")
 else:
@@ -432,4 +510,7 @@ else:
         del st.session_state["vectorstore"]
     if "current_file_name" in st.session_state:
         del st.session_state["current_file_name"]
+    if "chat_history" in st.session_state:
+        st.session_state.chat_history = []
+        del st.session_state["chat_history"]
     st.info("💡 Tap 'Choose Document File' above to upload a document and activate the workspace.")
