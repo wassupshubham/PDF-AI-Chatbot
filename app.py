@@ -391,18 +391,17 @@ temperature = st.sidebar.slider(
     step=0.1
 )
 
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Clear Session Cache", type="primary"):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.success("System memory wiped clean!")
+    st.rerun()
+
 st.markdown('<div class="breathing-header">🤖 InsightDocs AI Workspace</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Mobile-optimized deep document and image intelligence dashboard.</div>', unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    uploaded_file = st.file_uploader("Choose Document File", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
-with col2:
-    if st.button("🔄 Clear System Session/Cache", type="primary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.success("System memory and in-memory databases wiped clean!")
-        st.rerun()
+uploaded_file = st.file_uploader("Choose Document File", type=["pdf", "docx", "txt", "md"], label_visibility="collapsed")
 
 st.markdown("---")
 
